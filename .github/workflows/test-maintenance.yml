@@ -3,100 +3,45 @@ name: PagerDuty Maintenance Window
 on:
   workflow_dispatch:
     inputs:
-      service_names:
-        description: 'Custom name for service P1DF299'
-        type: string
-        default: 'Prod API'
-        required: false
-      service_names_2:
-        description: 'Custom name for service PJ5CTRB'
-        type: string
-        default: 'Prod DB'
-        required: false
-      service_names_3:
-        description: 'Custom name for service P86XAY9'
-        type: string
-        default: 'Prod Web'
-        required: false
-      service_names_4:
-        description: 'Custom name for service PUTC765'
-        type: string
-        default: 'Prod Cache'
-        required: false
-      service_names_5:
-        description: 'Custom name for service PYNFRNY'
-        type: string
-        default: 'Prod Queue'
-        required: false
-      service_names_6:
-        description: 'Custom name for service PEA4386'
-        type: string
-        default: 'Prod Auth'
-        required: false
-      select_services:
-        description: 'Choose services for maintenance'
-        type: boolean
-        default: false
-        required: true
-      service_P1DF299:
-        description: ${{ inputs.service_names || 'Prod API' }}
-        type: boolean
-        required: false
-      service_PJ5CTRB:
-        description: ${{ inputs.service_names_2 || 'Prod DB' }}
-        type: boolean
-        required: false
-      service_P86XAY9:
-        description: ${{ inputs.service_names_3 || 'Prod Web' }}
-        type: boolean
-        required: false
-      service_PUTC765:
-        description: ${{ inputs.service_names_4 || 'Prod Cache' }}
-        type: boolean
-        required: false
-      service_PYNFRNY:
-        description: ${{ inputs.service_names_5 || 'Prod Queue' }}
-        type: boolean
-        required: false
-      service_PEA4386:
-        description: ${{ inputs.service_names_6 || 'Prod Auth' }}
-        type: boolean
-        required: false
-      start_type:
-        description: 'When to start the maintenance window'
-        type: choice
-        required: true
-        options:
-          - 'Start Immediately'
-          - 'Schedule for Later'
-      scheduled_date:
-        description: 'Maintenance date (YYYY-MM-DD)'
-        required: false
-        type: string
-      scheduled_hour:
-        description: 'Hour (00-23)'
-        type: choice
-        required: false
-        options: ['00','01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22','23']
-      scheduled_minute:
-        description: 'Minute (00-59)'
-        type: choice
-        required: false
-        options: ['00','05','10','15','20','25','30','35','40','45','50','55']
-      timezone:
-        description: 'Your timezone (e.g., America/Los_Angeles, America/New_York, Europe/London)'
-        type: string
-        required: false
       duration_minutes:
         description: 'Duration in minutes'
         required: true
         type: number
         default: 15
+      select_all:
+        description: 'Select all services'
+        type: boolean
+        required: false
+        default: true
+      service_P1DF299:
+        description: 'P1DF299'
+        type: boolean
+        required: false
+      service_PJ5CTRB:
+        description: 'PJ5CTRB'
+        type: boolean
+        required: false
+      service_P86XAY9:
+        description: 'P86XAY9'
+        type: boolean
+        required: false
+      service_PUTC765:
+        description: 'PUTC765'
+        type: boolean
+        required: false
+      service_PYNFRNY:
+        description: 'PYNFRNY'
+        type: boolean
+        required: false
+      service_PEA4386:
+        description: 'PEA4386'
+        type: boolean
+        required: false
       maintenance_description:
         description: 'Description of maintenance work'
         required: true
         type: string
-        default: 'Scheduled maintenance window'
+        default: 'Maintenance window'
 
 jobs:
   create-maintenance-window:
@@ -107,7 +52,7 @@ jobs:
         run: |
           selected_ids=()
           
-          if [[ "${{ inputs.select_services }}" == "true" ]]; then
+          if [[ "${{ inputs.select_all }}" == "true" ]]; then
             selected_ids=("P1DF299" "PJ5CTRB" "P86XAY9" "PUTC765" "PYNFRNY" "PEA4386")
           else
             if [[ "${{ inputs.service_P1DF299 }}" == "true" ]]; then
@@ -134,43 +79,10 @@ jobs:
           echo "service_ids=$service_ids" >> $GITHUB_OUTPUT
           echo "Selected services: $service_ids"
 
-      - name: Setup Python
-        if: inputs.start_type == 'Schedule for Later'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: Install Python dependencies
-        if: inputs.start_type == 'Schedule for Later'
-        run: pip install pytz datetime
-
-      - name: Convert Time to UTC
-        if: inputs.start_type == 'Schedule for Later'
-        id: time_convert
+      - name: Validate Selection
         run: |
-          python -c "
-          from datetime import datetime
-          import pytz
-          
-          local_tz = pytz.timezone('${{ inputs.timezone }}')
-          local_time = datetime.strptime('${{ inputs.scheduled_date }} ${{ inputs.scheduled_hour }}:${{ inputs.scheduled_minute }}', '%Y-%m-%d %H:%M')
-          local_time = local_tz.localize(local_time)
-          utc_time = local_time.astimezone(pytz.UTC)
-          print(f'utc_time={utc_time.strftime("%Y-%m-%d %H:%M")}', end='')
-          " >> $GITHUB_OUTPUT
-
-      - name: Validate Inputs
-        id: validate
-        run: |
-          if [[ "${{ inputs.start_type }}" == "Schedule for Later" ]]; then
-            if [[ -z "${{ inputs.scheduled_date }}" || -z "${{ inputs.scheduled_hour }}" || -z "${{ inputs.scheduled_minute }}" || -z "${{ inputs.timezone }}" ]]; then
-              echo "Error: All scheduling fields are required when scheduling for later"
-              exit 1
-            fi
-          fi
-          
           if [[ -z "${{ steps.services.outputs.service_ids }}" ]]; then
-            echo "Error: At least one service must be selected"
+            echo "Error: Please select at least one service or choose 'Select all services'"
             exit 1
           fi
 
@@ -182,16 +94,9 @@ jobs:
           service-ids: ${{ steps.services.outputs.service_ids }}
           description: ${{ inputs.maintenance_description }}
           minutes: ${{ inputs.duration_minutes }}
-          start_time: ${{ inputs.start_type == 'Schedule for Later' && steps.time_convert.outputs.utc_time || '' }}
 
       - name: Output Window Details
         run: |
           echo "Maintenance Window ID: ${{ steps.maintenance-window.outputs.maintenance-window-id }}"
           echo "Selected Services: ${{ steps.services.outputs.service_ids }}"
-          if [[ "${{ inputs.start_type }}" == "Schedule for Later" ]]; then
-            echo "Local Start Time: ${{ inputs.scheduled_date }} ${{ inputs.scheduled_hour }}:${{ inputs.scheduled_minute }} ${{ inputs.timezone }}"
-            echo "UTC Start Time: ${{ steps.time_convert.outputs.utc_time }}"
-          else
-            echo "Started Immediately"
-          fi
           echo "Duration: ${{ inputs.duration_minutes }} minutes"
