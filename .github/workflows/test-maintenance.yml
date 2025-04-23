@@ -1,0 +1,20 @@
+name: Test PagerDuty Maintenance Window
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-maintenance-window:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create PagerDuty Maintenance Window
+        id: maintenance-window
+        uses: im-open/open-pagerduty-maintenance-window@v1.3.1
+        with:
+          pagerduty-api-key: ${{ secrets.PAGERDUTY_API_KEY }}
+          service-id: 'YOUR_PD_SERVICE_ID'  # Replace this with your service ID
+          description: 'Testing maintenance window'
+          minutes: 15
+
+      - name: Output Window ID
+        run: echo "Maintenance Window ID: ${{ steps.maintenance-window.outputs.maintenance-window-id }}"
