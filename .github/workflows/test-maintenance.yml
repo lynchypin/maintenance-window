@@ -12,7 +12,7 @@ jobs:
         uses: im-open/open-pagerduty-maintenance-window@v1.3.1
         with:
           pagerduty-api-key: ${{ secrets.PAGERDUTY_API_KEY }}
-          service-id: 'YOUR_PD_SERVICE_ID'  # Replace this with your service ID
+          service-ids: 'P1DF299,PJ5CTRB,P86XAY9,PUTC765,PYNFRNY,PEA4386'  # Replace this with your service ID
           description: 'Testing maintenance window'
           minutes: 15
 
