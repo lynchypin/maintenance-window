@@ -3,6 +3,65 @@ name: PagerDuty Maintenance Window
 on:
   workflow_dispatch:
     inputs:
+      service_names:
+        description: 'Custom name for service P1DF299'
+        type: string
+        default: 'Prod API'
+        required: false
+      service_names_2:
+        description: 'Custom name for service PJ5CTRB'
+        type: string
+        default: 'Prod DB'
+        required: false
+      service_names_3:
+        description: 'Custom name for service P86XAY9'
+        type: string
+        default: 'Prod Web'
+        required: false
+      service_names_4:
+        description: 'Custom name for service PUTC765'
+        type: string
+        default: 'Prod Cache'
+        required: false
+      service_names_5:
+        description: 'Custom name for service PYNFRNY'
+        type: string
+        default: 'Prod Queue'
+        required: false
+      service_names_6:
+        description: 'Custom name for service PEA4386'
+        type: string
+        default: 'Prod Auth'
+        required: false
+      select_services:
+        description: 'Choose services for maintenance'
+        type: boolean
+        default: false
+        required: true
+      service_P1DF299:
+        description: ${{ inputs.service_names || 'Prod API' }}
+        type: boolean
+        required: false
+      service_PJ5CTRB:
+        description: ${{ inputs.service_names_2 || 'Prod DB' }}
+        type: boolean
+        required: false
+      service_P86XAY9:
+        description: ${{ inputs.service_names_3 || 'Prod Web' }}
+        type: boolean
+        required: false
+      service_PUTC765:
+        description: ${{ inputs.service_names_4 || 'Prod Cache' }}
+        type: boolean
+        required: false
+      service_PYNFRNY:
+        description: ${{ inputs.service_names_5 || 'Prod Queue' }}
+        type: boolean
+        required: false
+      service_PEA4386:
+        description: ${{ inputs.service_names_6 || 'Prod Auth' }}
+        type: boolean
+        required: false
       start_type:
         description: 'When to start the maintenance window'
         type: choice
@@ -19,19 +78,6 @@ on:
         required: true
         type: number
         default: 15
-      selected_services:
-        description: 'Select services for maintenance'
-        required: true
-        type: choice
-        options:
-          - "All Services"
-          - "Prod API (P1DF299)"
-          - "Prod DB (PJ5CTRB)"
-          - "Prod Web (P86XAY9)"
-          - "Prod Cache (PUTC765)"
-          - "Prod Queue (PYNFRNY)"
-          - "Prod Auth (PEA4386)"
-        multiple: true
       maintenance_description:
         description: 'Description of maintenance work'
         required: true
@@ -45,40 +91,50 @@ jobs:
       - name: Process Selected Services
         id: services
         run: |
-          # Create a mapping of service names to IDs
-          declare -A service_map
-          service_map["Prod API"]="P1DF299"
-          service_map["Prod DB"]="PJ5CTRB"
-          service_map["Prod Web"]="P86XAY9"
-          service_map["Prod Cache"]="PUTC765"
-          service_map["Prod Queue"]="PYNFRNY"
-          service_map["Prod Auth"]="PEA4386"
-          
-          # Initialize empty array for selected service IDs
           selected_ids=()
           
-          # Process selections
-          IFS=',' read -ra SERVICES <<< "${{ inputs.selected_services }}"
-          for service in "${SERVICES[@]}"; do
-            if [[ "$service" == "All Services" ]]; then
-              # Add all service IDs
-              for id in "${service_map[@]}"; do
-                selected_ids+=("$id")
-              done
-              break
-            else
-              # Extract service name from the option (remove the ID part)
-              service_name=$(echo "$service" | sed 's/ (.*)$//')
-              if [[ -n "${service_map[$service_name]}" ]]; then
-                selected_ids+=("${service_map[$service_name]}")
-              fi
+          # Check if all services are selected
+          if [[ "${{ inputs.select_services }}" == "true" ]]; then
+            selected_ids=("P1DF299" "PJ5CTRB" "P86XAY9" "PUTC765" "PYNFRNY" "PEA4386")
+          else
+            # Add individual selections
+            if [[ "${{ inputs.service_P1DF299 }}" == "true" ]]; then
+              selected_ids+=("P1DF299")
             fi
-          done
+            if [[ "${{ inputs.service_PJ5CTRB }}" == "true" ]]; then
+              selected_ids+=("PJ5CTRB")
+            fi
+            if [[ "${{ inputs.service_P86XAY9 }}" == "true" ]]; then
+              selected_ids+=("P86XAY9")
+            fi
+            if [[ "${{ inputs.service_PUTC765 }}" == "true" ]]; then
+              selected_ids+=("PUTC765")
+            fi
+            if [[ "${{ inputs.service_PYNFRNY }}" == "true" ]]; then
+              selected_ids+=("PYNFRNY")
+            fi
+            if [[ "${{ inputs.service_PEA4386 }}" == "true" ]]; then
+              selected_ids+=("PEA4386")
+            fi
+          fi
           
           # Join service IDs with commas
           service_ids=$(IFS=,; echo "${selected_ids[*]}")
           echo "service_ids=$service_ids" >> $GITHUB_OUTPUT
           echo "Selected services: $service_ids"
+
+      - name: Validate Inputs
+        id: validate
+        run: |
+          if [[ "${{ inputs.start_type }}" == "Schedule for Later" && -z "${{ inputs.scheduled_start }}" ]]; then
+            echo "Error: Scheduled start time is required when scheduling for later"
+            exit 1
+          fi
+          
+          if [[ -z "${{ steps.services.outputs.service_ids }}" ]]; then
+            echo "Error: At least one service must be selected"
+            exit 1
+          fi
 
       - name: Create PagerDuty Maintenance Window
         id: maintenance-window
