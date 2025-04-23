@@ -1,20 +1,187 @@
-name: Test PagerDuty Maintenance Window
+name: Schedule PagerDuty Maintenance Window
 
 on:
   workflow_dispatch:
+    inputs:
+      scheduled_start:
+        description: 'Scheduled start time (YYYY-MM-DD HH:mm) in UTC'
+        required: true
+        type: string
+      duration_minutes:
+        description: 'Duration in minutes'
+        required: true
+        type: number
+        default: 60
+      selected_services:
+        description: 'Select services for maintenance'
+        required: true
+        type: choice
+        options:
+          - "All Services"
+          - "API Service (P1DF299)"
+          - "Database Service (PJ5CTRB)"
+          - "Web Service (P86XAY9)"
+          - "Cache Service (PUTC765)"
+          - "Queue Service (PYNFRNY)"
+          - "Auth Service (PEA4386)"
+        multiple: true
+      reminder_days:
+        description: 'Days before maintenance for reminders (comma-separated)'
+        required: true
+        type: string
+        default: '7,3,1'
+      reminder_hours:
+        description: 'Hours before maintenance for reminders (comma-separated)'
+        required: true
+        type: string
+        default: '24,12,2'
+      maintenance_description:
+        description: 'Description of the maintenance work'
+        required: true
+        type: string
+      pre_maintenance_message:
+        description: 'Message template for advance notifications. Use {time_before} and {unit} as placeholders'
+        required: true
+        type: string
+        default: '⚠️ Scheduled maintenance in {time_before} {unit}: {description}'
+      start_maintenance_message:
+        description: 'Message when maintenance begins'
+        required: true
+        type: string
+        default: '🔧 Maintenance window is now starting: {description}'
 
 jobs:
-  test-maintenance-window:
+  schedule-maintenance:
     runs-on: ubuntu-latest
     steps:
+      - name: Process Selected Services
+        id: services
+        run: |
+          # Create a mapping of service names to IDs
+          declare -A service_map
+          service_map["API Service"]="P1DF299"
+          service_map["Database Service"]="PJ5CTRB"
+          service_map["Web Service"]="P86XAY9"
+          service_map["Cache Service"]="PUTC765"
+          service_map["Queue Service"]="PYNFRNY"
+          service_map["Auth Service"]="PEA4386"
+          
+          # Initialize empty array for selected service IDs
+          selected_ids=()
+          
+          # Process selections
+          IFS=',' read -ra SERVICES <<< "${{ inputs.selected_services }}"
+          for service in "${SERVICES[@]}"; do
+            if [[ "$service" == "All Services" ]]; then
+              # Add all service IDs
+              for id in "${service_map[@]}"; do
+                selected_ids+=("$id")
+              done
+              break
+            else
+              # Extract service name from the option (remove the ID part)
+              service_name=$(echo "$service" | sed 's/ (.*)$//')
+              if [[ -n "${service_map[$service_name]}" ]]; then
+                selected_ids+=("${service_map[$service_name]}")
+              fi
+            fi
+          done
+          
+          # Join service IDs with commas
+          service_ids=$(IFS=,; echo "${selected_ids[*]}")
+          echo "service_ids=$service_ids" >> $GITHUB_OUTPUT
+          echo "Selected services: $service_ids"
+
       - name: Create PagerDuty Maintenance Window
         id: maintenance-window
         uses: im-open/open-pagerduty-maintenance-window@v1.3.1
         with:
           pagerduty-api-key: ${{ secrets.PAGERDUTY_API_KEY }}
-          service-ids: 'P1DF299,PJ5CTRB,P86XAY9,PUTC765,PYNFRNY,PEA4386'
-          description: 'Testing maintenance window'
-          minutes: 15
+          service-ids: ${{ steps.services.outputs.service_ids }}
+          description: ${{ inputs.maintenance_description }}
+          minutes: ${{ inputs.duration_minutes }}
+          start_time: ${{ inputs.scheduled_start }}
 
-      - name: Output Window ID
-        run: echo "Maintenance Window ID - ${{ steps.maintenance-window.outputs.maintenance-window-id }}"
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install PagerDuty API Client
+        run: pip install pdpyras requests
+
+      - name: Create Status Page Updates
+        env:
+          PAGERDUTY_API_KEY: ${{ secrets.PAGERDUTY_API_KEY }}
+          STATUS_PAGE_ID: 'P4TG80Y'  # Your status page ID
+          MAINTENANCE_ID: ${{ steps.maintenance-window.outputs.maintenance-window-id }}
+          SCHEDULED_START: ${{ inputs.scheduled_start }}
+          REMINDER_DAYS: ${{ inputs.reminder_days }}
+          REMINDER_HOURS: ${{ inputs.reminder_hours }}
+          MAINTENANCE_DESCRIPTION: ${{ inputs.maintenance_description }}
+          PRE_MAINTENANCE_MESSAGE: ${{ inputs.pre_maintenance_message }}
+          START_MAINTENANCE_MESSAGE: ${{ inputs.start_maintenance_message }}
+        run: |
+          cat << 'EOF' > create_reminders.py
+          import os
+          from datetime import datetime, timedelta
+          from pdpyras import APISession
+          
+          api_key = os.environ['PAGERDUTY_API_KEY']
+          status_page_id = os.environ['STATUS_PAGE_ID']
+          maintenance_id = os.environ['MAINTENANCE_ID']
+          scheduled_start = datetime.strptime(os.environ['SCHEDULED_START'], '%Y-%m-%d %H:%M')
+          description = os.environ['MAINTENANCE_DESCRIPTION']
+          pre_message_template = os.environ['PRE_MAINTENANCE_MESSAGE']
+          start_message = os.environ['START_MAINTENANCE_MESSAGE']
+          
+          # Parse reminder times
+          reminder_days = [int(d) for d in os.environ['REMINDER_DAYS'].split(',')]
+          reminder_hours = [int(h) for h in os.environ['REMINDER_HOURS'].split(',')]
+          
+          session = APISession(api_key)
+          
+          def create_status_update(time_before, unit):
+              if time_before == 0:
+                  message = start_message.format(description=description)
+              else:
+                  message = pre_message_template.format(
+                      time_before=time_before,
+                      unit=unit,
+                      description=description
+                  )
+              
+              try:
+                  scheduled_time = scheduled_start - timedelta(**{unit: time_before})
+                  response = session.post(
+                      f'status_pages/{status_page_id}/post_updates',
+                      json={
+                          "message": message,
+                          "maintenance_id": maintenance_id,
+                          "scheduled_for": scheduled_time.isoformat()
+                      }
+                  )
+                  print(f"Created status update scheduled for {scheduled_time}")
+                  print(f"Message: {message}")
+              except Exception as e:
+                  print(f"Error creating status update: {e}")
+          
+          # Create day-based reminders
+          for days in reminder_days:
+              create_status_update(days, 'days')
+          
+          # Create hour-based reminders
+          for hours in reminder_hours:
+              create_status_update(hours, 'hours')
+          
+          # Create start-time notification
+          create_status_update(0, 'hours')
+          EOF
+          
+          python create_reminders.py
+
+      - name: Output Window Details
+        run: |
+          echo "Maintenance Window ID: ${{ steps.maintenance-window.outputs.maintenance-window-id }}"
+          echo "Selected Services: ${{ steps.services.outputs.service_ids }}"
+          echo "Status page updates have been scheduled"
